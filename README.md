@@ -1,6 +1,6 @@
 # Antibody Developability Prediction Using CNNs
 
-This project builds a sequence-based classifier to predicts antbody developability. Positive examples come from Thera-SAbDab, and negative (unlabeled) examples come from the Observed Antibody Space (OAS). A lightweight 1D CNN is trained on VH amino-acid sequences after careful preprocessing, masking, and stratified splitting, and CDR3-grouping to avoid clone leakage.
+This project builds a sequence-based classifier to predicts antbody developability. Positive examples come from Thera-SAbDab, and negative (unlabeled) examples come from the Observed Antibody Space (OAS). A lightweight 1D CNN is trained on VH amino-acid sequences after careful preprocessing, masking, IGHV-distribution matching, and CDR3-based grouping to avoid clone leakage.
 
 
 ---
@@ -64,62 +64,129 @@ This forms the **background/unlabeled** class (label = 0).
 
 ## Preprocessing & Splitting
 
-- All sequences were tokenized into indices over:
-  - 20 canonical amino acids + `X` (mask token)
-- First **8 amino acids were masked to `X`** in all sequences to prevent trivial therapeutic-specific motifs from dominating.
-- Train/validation/test splits were generated using **CDR3-based grouping** to prevent clone leakage.
-- Stratified splitting ensured balanced representation across folds.
+**Tokenization**
+
+Each sequence is converted to indices over:
+
+* 20 canonical amino acids
+
+* X = mask token
+
+* 0 = padding index
+
+All input sequences must match this vocabulary.
+
+**N-terminal Masking (Important)**
+
+
+The first 8 residues of every VH sequence were masked to X during training
+
+``seq = "X" * 8 + seq[8:]``
+
+This prevents the CNN from learning superficial dataset-specific motifs in FR1 that were enriched in therapeutic antibodies.
+
+**This masking must also be applied during inference, or the model will encounter unseen patterns and may produce unreliable predictions.**
+
+**Clone-Safe Splitting (CDR3 grouping)**
+
+To avoid information leakage, all sequences sharing the same CDR3 amino-acid sequence were grouped and assigned to the same split.
+
+Applied independently to positive and background sets.
+
+Splits were then stratified to preserve class proportions.
 
 ---
 
 ## Model
 
-A lightweight **multi-kernel 1D Convolutional Neural Network (CNN)** was used:
+A lightweight multi-kernel 1D CNN architecture:
 
-- Embedding dimension: **64**
-- Convolutional filters: **128** per kernel size
-- Kernel sizes: **3, 5, 7**
-- Global max pooling over sequence length
-- Dropout: **0.3**
-- Fully connected output layer → binary logit
+Embedding: 64-dim
 
-The model processes padded batches of tokenized VH sequences.
+Convolution filters: 128 each
+
+Kernel sizes: 3, 5, 7
+
+Activation: ReLU
+
+Global max pooling over sequence length
+
+Dropout: 0.3
+
+Final fully connected layer producing a single binary logit
+
+Pads are zero-embedded (padding_idx=0).
 
 ---
 
 ## Training
 
-- Loss: **BCEWithLogitsLoss** with `pos_weight ≈ 10.7` (to correct strong class imbalance)
-- Optimizer: **AdamW**
-  - Learning rate: `1e-3`
-  - Weight decay: `1e-4`
-- Batch size: **32**
-- Device: GPU if available
 
-Example training progression (summarized):
+Loss: BCEWithLogitsLoss(pos_weight ≈ 10.7)
 
-- Training accuracy increased steadily
-- Validation accuracy peaked around **0.92**
-- Loss curves showed stable learning
+Corrects for strong imbalance (~10× more negatives than positives)
+
+Optimizer: AdamW
+
+LR = 1e-3
+
+Weight decay = 1e-4
+
+Batch size: 32
+
+Device: GPU if available
+
+Training and validation curves show stable learning with no major overfitting.
 
 ---
 
 ## Evaluation
 
-The test set is highly imbalanced:
+The test set:
 
-- 295 background (0)
-- 25 positive (1)
-- Majority baseline accuracy: **0.922**
+295 background sequences
 
-More informative metrics were computed:
+25 positive sequences
 
-**Test results:**
+Majority-class baseline accuracy = 0.922
 
-- **AUROC: 0.9833**
-- **AUPRC: 0.8502**
+Because accuracy is misleading, AUROC and AUPRC were used.
 
-The model substantially outperforms the majority-class baseline and demonstrates strong ranking capability.
+Test Metrics
+
+AUROC: 0.9833
+
+AUPRC: 0.8502
+
+The model outperforms the majority baseline and shows strong ranking performance.
+
+---
+
+## Inference Requirements
+
+To use the model correctly, the following preprocessing is mandatory:
+
+1. Mask the first 8 N-terminal residues
+
+2. Uppercase the sequence
+
+3. Replace any non-canonical residue with "X"
+
+4. Ensure VH length ≈ 90–150 aa
+
+5. Convert to token indices using the provided vocabulary
+
+6. Pad with index 0 for batching
+
+---
+
+## Limitations
+
+Positive set (182 sequences) is small → risk of overfitting.
+
+The background (OAS) class may contain developable antibodies.
+
+Only VH sequence is used (no VL, no structural features, no CDR3 biophysics, no glycosylation signals).
 
 ---
 
@@ -154,18 +221,17 @@ The model substantially outperforms the majority-class baseline and demonstrates
 ``└── .gitignore``
 
 
-
-
+---
 
 ## Future Work
 
-Explore transformer-based embeddings (ESM, ProtBERT)
+Incorporate transformer embeddings (ESM-2, ProtBERT, IgBERT)
 
-Use positive–unlabeled (PU) learning methods
+Positive–unlabeled (PU) learning for more principled handling of unlabeled OAS data
 
-Add multi-task developability labels (aggregation, stability)
+Add explicit developability labels (aggregation, hydrophobicity, charge, stability)
 
-Compare VH-only models with paired VH–VL models
+Evaluate VH-only vs. paired VH–VL models
 
 
 
